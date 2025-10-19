@@ -5,159 +5,90 @@
   <title>Census Agent</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 0; background:#0b0f14; color:#e7edf3; }
+    body { font-family: system-ui, Arial, sans-serif; margin:0; background:#0b0f14; color:#e7edf3; }
     header { padding:16px; border-bottom:1px solid #1f2937; }
-    main { display:flex; gap:20px; padding:16px; }
-    .left, .right { flex:1; }
-    .card { background:#0f1621; border:1px solid #1f2937; border-radius:10px; padding:14px; }
-    label { display:block; margin:10px 0 6px; color:#cbd5e1; }
-    input[type=file] { width:100%; }
-    button { background:#2563eb; color:#fff; border:none; padding:10px 14px; border-radius:8px; cursor:pointer; }
-    button[disabled] { opacity:.5; cursor:not-allowed; }
-    #chat { height:520px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
-    .msg { padding:10px 12px; border-radius:10px; max-width:78%; }
-    .me { background:#1f2937; align-self:flex-end; }
-    .bot { background:#111827; border:1px solid #1f2937; align-self:flex-start; }
-    .row { display:flex; gap:8px; margin-top:10px; }
-    pre { white-space:pre-wrap; word-wrap:break-word; }
-    .muted { color:#94a3b8; font-size:12px; }
-    .pill { display:inline-block; padding:2px 8px; background:#1f2937; border-radius:999px; }
-    .err { color:#fca5a5; }
+    main { display:flex; justify-content:center; padding:16px; }
+    openai-chatkit { width: 430px; height: 720px; border:1px solid #1f2937; border-radius:12px; }
   </style>
+  <script src="https://cdn.platform.openai.com/deployments/chatkit/chatkit.js" async></script>
 </head>
 <body>
-  <header>
-    <strong>Census Agent</strong>
-    <span class="muted"> — AI-driven census transform</span>
-  </header>
+  <header><strong>Census Agent</strong></header>
   <main>
-    <div class="left card">
-      <label>Source census file</label>
-      <input id="src" type="file" accept=".csv,.xlsx,.xls,.txt"/>
-      <label style="margin-top:16px;">Carrier template file</label>
-      <input id="tpl" type="file" accept=".csv,.xlsx,.xls,.txt"/>
-      <div class="row">
-        <button id="start">Start</button>
-        <span id="session" class="pill"></span>
-      </div>
-      <hr/>
-      <label>Message</label>
-      <input id="msg" type="text" placeholder="Answer clarifiers or type 'yes' to export…" style="width:100%; padding:8px; border-radius:8px; border:1px solid #1f2937; background:#0b0f14; color:#e7edf3;"/>
-      <div class="row">
-        <button id="send">Send</button>
-      </div>
-      <p id="status" class="muted"></p>
-    </div>
-    <div class="right card">
-      <div id="chat"></div>
-    </div>
+    <openai-chatkit id="census-chat"></openai-chatkit>
   </main>
-  <script>
-    // ---------- CHANGE THIS ----------
+  <script type="module">
+    // Point this to your Render API base
     const API_BASE = "https://census-api-uyfo.onrender.com";
-    // ---------------------------------
+    const chat = document.getElementById("census-chat");
 
-    const el = (id)=>document.getElementById(id);
-    const chat = el("chat");
-    const statusEl = el("status");
-    const sessionBadge = el("session");
-    let sessionId = "";
-
-    function addMsg(text, who="bot") {
-      const div = document.createElement("div");
-      div.className = "msg "+(who==="me"?"me":"bot");
-      div.innerHTML = text;
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
-    }
-    function setStatus(txt, isErr=false) {
-      statusEl.textContent = txt || "";
-      statusEl.className = isErr ? "muted err" : "muted";
-    }
-    function renderPreview(rows) {
-      if (!rows || !rows.length) return "No rows.";
-      const cols = Object.keys(rows[0]);
-      let out = cols.join(", ") + "\n";
-      rows.forEach(r=>{
-        out += cols.map(c => (r[c]??"")).join(", ") + "\n";
+    function pickTwoFiles(accept = ".csv,.xlsx,.xls,.txt") {
+      return new Promise((resolve, reject) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = accept;
+        input.multiple = true;
+        input.onchange = () => {
+          const files = Array.from(input.files || []);
+          if (files.length !== 2) reject(new Error("Please select exactly TWO files: source + template."));
+          else resolve(files);
+        };
+        input.click();
       });
-      return out;
-    }
-    async function asJson(r) {
-      const t = await r.text();
-      try { return JSON.parse(t); }
-      catch { throw new Error(`Non-JSON (${r.status} ${r.statusText}): ${t.slice(0,300)}`); }
     }
 
-    async function start() {
-      const src = el("src").files[0];
-      const tpl = el("tpl").files[0];
-      if (!src || !tpl) { addMsg("Please upload BOTH files.", "bot"); return; }
+    let sessionId = null;
 
-      setStatus("");
-      addMsg("Uploading files and profiling...", "bot");
+    async function getClientSecret() {
+      const r = await fetch(`${API_BASE}/api/chatkit/session`, { method: "POST" });
+      if (!r.ok) throw new Error(`chatkit session failed: ${r.status} ${r.statusText}`);
+      const j = await r.json();
+      if (!j.client_secret) throw new Error("No client_secret in response");
+      return j.client_secret;
+    }
 
-      // 1) start session with files
-      const fd = new FormData();
-      fd.append("source_file", src);
-      fd.append("template_file", tpl);
-      try {
-        const r = await fetch(`${API_BASE}/agent/start`, { method:"POST", body: fd });
-        if (!r.ok) throw new Error(`/agent/start failed: ${r.status} ${r.statusText}`);
-        const j = await asJson(r);
-        sessionId = j.session_id;
-        sessionBadge.textContent = sessionId ? ("session " + sessionId.slice(0,8)) : "";
-      } catch (e) {
-        addMsg("⚠️ Could not start: " + e.message, "bot");
-        setStatus("Hint: /agent/start must be accessible and accept files.", true);
-        return;
+    chat.setOptions({
+      api: {
+        async getClientSecret(existing) { return getClientSecret(); }
+      },
+      async onClientTool({ name, params }) {
+        switch (name) {
+          case "start_census_session": {
+            const [source, template] = await pickTwoFiles();
+            const fd = new FormData();
+            fd.append("source_file", source);
+            fd.append("template_file", template);
+            const r = await fetch(`${API_BASE}/agent/start`, { method:"POST", body: fd });
+            if (!r.ok) throw new Error(`/agent/start failed: ${r.status} ${r.statusText}`);
+            const j = await r.json();
+            sessionId = j.session_id;
+            return { session_id: sessionId };
+          }
+          case "agent_turn": {
+            if (!sessionId) throw new Error("No active session. Call start_census_session() first.");
+            const body = { session_id: sessionId, text: String(params?.text ?? "") };
+            const r = await fetch(`${API_BASE}/agent/message_json`, {
+              method:"POST",
+              headers: { "Content-Type":"application/json" },
+              body: JSON.stringify(body)
+            });
+            const raw = await r.text();
+            let j; try { j = JSON.parse(raw); } catch { throw new Error(`Non-JSON from /agent/message_json: ${raw.slice(0,200)}`); }
+            if (j.session_id) sessionId = j.session_id;  // keep in sync
+            return j; // { text, preview?, download_url? }
+          }
+          case "open_export": {
+            const url = params?.url;
+            if (!url) throw new Error("Missing url");
+            const href = url.startsWith("http") ? url : `${API_BASE}${url}`;
+            window.open(href, "_blank", "noopener");
+            return {};
+          }
+          default:
+            throw new Error(`Unhandled client tool: ${name}`);
+        }
       }
-
-      // 2) trigger the agent turn
-      try {
-        const r2 = await fetch(`${API_BASE}/agent/message`, {
-          method:"POST",
-          headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ session_id: sessionId, text: "" })
-        });
-        if (!r2.ok) throw new Error(`/agent/message failed: ${r2.status} ${r2.statusText}`);
-        const j2 = await asJson(r2);
-
-        if (j2.text) addMsg(j2.text, "bot");
-        if (j2.preview) addMsg("<pre>"+renderPreview(j2.preview)+"</pre>", "bot");
-        if (j2.download_url) addMsg(`<a href="${API_BASE}${j2.download_url}">Download Transformed File</a>`, "bot");
-      } catch (e) {
-        addMsg("⚠️ Error during profiling: " + e.message, "bot");
-        setStatus(`If this is 400/422, message expects JSON {session_id, text}`, true);
-      }
-    }
-
-    async function send() {
-      const text = el("msg").value.trim();
-      if (!sessionId) { addMsg("Start a session first.", "bot"); return; }
-      if (!text) return;
-      addMsg(text, "me");
-      el("msg").value = "";
-
-      try {
-        const r = await fetch(`${API_BASE}/agent/message`, {
-          method:"POST",
-          headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({ session_id: sessionId, text })
-        });
-        if (!r.ok) throw new Error(`/agent/message failed: ${r.status} ${r.statusText}`);
-        const j = await asJson(r);
-        if (j.text) addMsg(j.text, "bot");
-        if (j.preview) addMsg("<pre>"+renderPreview(j.preview)+"</pre>", "bot");
-        if (j.download_url) addMsg(`<a href="${API_BASE}${j.download_url}">Download Transformed File</a>`, "bot");
-      } catch (e) {
-        addMsg("⚠️ Error: " + e.message, "bot");
-        setStatus("Hint: /agent/message should be JSON (not multipart).", true);
-      }
-    }
-
-    el("start").onclick = start;
-    el("send").onclick = send;
+    });
   </script>
 </body>
 </html>
