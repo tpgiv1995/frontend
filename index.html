@@ -5,71 +5,160 @@
   <title>Census Agent</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin:0; background:#0b0f14; color:#e7edf3; }
-    header { padding:16px; border-bottom:1px solid #1f2937; }
-    main { display:flex; justify-content:center; padding:16px; }
-    openai-chatkit { width: 430px; height: 720px; border:1px solid #1f2937; border-radius:12px; }
+    :root {
+      --bg: #0b0f14;
+      --card: #0f1621;
+      --muted: #94a3b8;
+      --line: #1f2937;
+      --text: #e7edf3;
+      --cta: #2563eb;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+    header { padding: 16px; border-bottom: 1px solid var(--line); display:flex; justify-content:center; }
+    main { display: flex; flex-direction: column; gap: 12px; align-items: center; padding: 16px; }
+    .wrap { width: 100%; max-width: 1100px; }
+    .uploader {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .uploader-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .uploader-col {
+      min-width: 260px;
+      flex: 1 1 260px;
+    }
+    .uploader label { display: block; font-size: 12px; color: #cbd5e1; }
+    .uploader input[type=file] {
+      width: 100%;
+      margin-top: 4px;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .uploader .title { font-weight: 600; margin-bottom: 4px; }
+    .uploader .sub { font-size: 12px; color: var(--muted); }
+    .actions { display: flex; gap: 8px; align-items: center; }
+    .btn {
+      background: var(--cta);
+      color: #fff;
+      border: none;
+      padding: 10px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .hint { font-size: 12px; color: var(--muted); }
+    /* Chat widget */
+    openai-chatkit {
+      width: 430px;
+      height: 720px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #0b0f14;
+    }
+    /* Make widget expand a bit on larger screens if you like:
+      @media (min-width: 1200px) { openai-chatkit { width: 520px; } }
+    */
   </style>
-
-<div id="uploader" style="max-width:430px;margin:0 auto 12px auto;">
-  <div style="background:#0f1621;border:1px solid #1f2937;border-radius:10px;padding:12px;">
-    <div style="font-weight:600;margin-bottom:6px;">Please upload your files to begin</div>
-    <div style="font-size:13px;color:#94a3b8;margin-bottom:10px;">
-      Upload <b>both</b> the <i>source census</i> and the <i>carrier template</i>, then press Start.
-    </div>
-    <label style="display:block;margin:6px 0 4px;">Source census file</label>
-    <input id="src" type="file" accept=".csv,.xlsx,.xls,.txt" style="width:100%;">
-
-    <label style="display:block;margin:10px 0 4px;">Carrier template file</label>
-    <input id="tpl" type="file" accept=".csv,.xlsx,.xls,.txt" style="width:100%;">
-
-    <div style="display:flex;gap:8px;margin-top:10px;">
-      <button id="startBtn" style="background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;">
-        Start
-      </button>
-      <span id="hint" style="font-size:12px;color:#94a3b8;align-self:center;"></span>
-    </div>
-  </div>
-</div>
-  
   <!-- Load ChatKit -->
   <script src="https://cdn.platform.openai.com/deployments/chatkit/chatkit.js" async></script>
 </head>
+
 <body>
   <header><strong>Census Agent</strong></header>
+
   <main>
+    <div class="wrap">
+      <!-- Compact horizontal uploader banner -->
+      <div id="uploader" class="uploader">
+        <div class="uploader-row">
+          <div class="uploader-col">
+            <div class="title">Upload files to begin</div>
+            <div class="sub">
+              Choose <b>source census</b> and <b>carrier template</b> then click <b>Start</b>.
+              (Or use the <b>paperclip</b> inside chat.)
+            </div>
+          </div>
+
+          <div class="uploader-col">
+            <label>Source census
+              <input id="src" type="file" accept=".csv,.xlsx,.xls,.txt">
+            </label>
+          </div>
+
+          <div class="uploader-col">
+            <label>Carrier template
+              <input id="tpl" type="file" accept=".csv,.xlsx,.xls,.txt">
+            </label>
+          </div>
+
+          <div class="actions">
+            <button id="startBtn" class="btn">Start</button>
+            <span id="hint" class="hint"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat widget -->
     <openai-chatkit id="census-chat"></openai-chatkit>
   </main>
 
   <script type="module">
     const API_BASE = "https://census-api-uyfo.onrender.com";
 
-// Nudge the agent to call start_census_session by sending a tiny user message.
-// The agent instructions will immediately try start_census_session() after any message.
-document.getElementById("startBtn").onclick = async () => {
-  const src = document.getElementById("src").files[0];
-  const tpl = document.getElementById("tpl").files[0];
-  const hint = document.getElementById("hint");
+    // DOM elements
+    const srcEl = document.getElementById("src");
+    const tplEl = document.getElementById("tpl");
+    const startBtn = document.getElementById("startBtn");
+    const hintEl = document.getElementById("hint");
+    const chatEl = document.getElementById("census-chat");
 
-  if (!src || !tpl) {
-    hint.textContent = "Please select BOTH files first.";
-    return;
-  }
-  hint.textContent = "Starting… check the chat.";
+    // If banner files exist, use them; otherwise prompt for two files
+    async function getBannerFilesOrPick() {
+      if (srcEl?.files?.[0] && tplEl?.files?.[0]) {
+        return [srcEl.files[0], tplEl.files[0]];
+      }
+      return new Promise((resolve, reject) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".csv,.xlsx,.xls,.txt";
+        input.multiple = true;
+        input.onchange = () => {
+          const files = Array.from(input.files || []);
+          if (files.length !== 2) reject(new Error("Please select exactly TWO files: source + template."));
+          else resolve(files);
+        };
+        input.click();
+      });
+    }
 
-  // Send a trivial message so the agent wakes and calls start_census_session()
-  // (The onClientTool handler below will see your preselected files and use those.)
-  try {
-    // ChatKit has no direct "send" API here, so just let the agent start naturally.
-    // A tiny hack: programmatically focus the chat to get it to render if idle.
-    document.getElementById("census-chat").scrollIntoView({behavior: "smooth"});
-    // You can also type a quick "start" to the input if you’ve extended ChatKit; otherwise,
-    // the agent's greeting + your click are enough to get it going.
-  } catch (e) {
-    hint.textContent = "Could not initiate. Try clicking into the chat and say 'start'.";
-  }
-};
-    
+    // The Start button: guide user + prep files; agent will call the tool
+    startBtn.onclick = async () => {
+      const src = srcEl?.files?.[0], tpl = tplEl?.files?.[0];
+      if (!src || !tpl) {
+        hintEl.textContent = "Please select BOTH files first.";
+        return;
+      }
+      hintEl.textContent = "Starting… click the chat input and press Enter if it doesn't move in 2s.";
+      chatEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setTimeout(() => {
+        if (hintEl.textContent.startsWith("Starting…")) {
+          hintEl.textContent = "If nothing appears, click the chat input and press Enter to begin.";
+        }
+      }, 1500);
+    };
+
+    // Basic fallback picker (used only if banner files aren’t provided)
     function pickTwoFiles(accept = ".csv,.xlsx,.xls,.txt") {
       return new Promise((resolve, reject) => {
         const input = document.createElement("input");
@@ -104,49 +193,33 @@ document.getElementById("startBtn").onclick = async () => {
             return getClientSecret();
           }
         },
+
         async onClientTool({ name, params }) {
           switch (name) {
             case "start_census_session": {
-              // Prefer pre-selected files from the page (if provided), otherwise fall back to a file picker.
-              const srcInput = document.getElementById("src");
-              const tplInput = document.getElementById("tpl");
+              // Prefer pre-selected banner files; otherwise fall back to picker
               let source, template;
-            
-              if (srcInput && tplInput && srcInput.files[0] && tplInput.files[0]) {
-                source = srcInput.files[0];
-                template = tplInput.files[0];
+              if (srcEl?.files?.[0] && tplEl?.files?.[0]) {
+                source = srcEl.files[0];
+                template = tplEl.files[0];
               } else {
-                // fallback: let the user pick now
-                const picked = await (async function pickTwoFiles(accept = ".csv,.xlsx,.xls,.txt") {
-                  return new Promise((resolve, reject) => {
-                    const input = document.createElement("input");
-                    input.type = "file";
-                    input.accept = accept;
-                    input.multiple = true;
-                    input.onchange = () => {
-                      const files = Array.from(input.files || []);
-                      if (files.length !== 2) reject(new Error("Please select exactly TWO files: source + template."));
-                      else resolve(files);
-                    };
-                    input.click();
-                  });
-                })();
+                const picked = await pickTwoFiles();
                 [source, template] = picked;
               }
-            
+
               const fd = new FormData();
               fd.append("source_file", source);
               fd.append("template_file", template);
-            
-              const r = await fetch(`${API_BASE}/agent/start`, { method:"POST", body: fd });
+
+              const r = await fetch(`${API_BASE}/agent/start`, { method: "POST", body: fd });
               if (!r.ok) throw new Error(`/agent/start failed: ${r.status} ${r.statusText}`);
               const j = await r.json();
-            
-              // Clear hint text if visible
-              const hint = document.getElementById("hint");
-              if (hint) hint.textContent = "";
-            
-              // Return the session id back to the agent
+
+              // Clear banner hint now that session exists
+              if (hintEl) hintEl.textContent = "";
+
+              // Save session for later agent_turn calls
+              sessionId = j.session_id;
               return { session_id: j.session_id };
             }
 
@@ -154,14 +227,15 @@ document.getElementById("startBtn").onclick = async () => {
               if (!sessionId) throw new Error("No active session. Call start_census_session() first.");
               const body = { session_id: sessionId, text: String(params?.text ?? "") };
               const r = await fetch(`${API_BASE}/agent/message_json`, {
-                method:"POST",
+                method: "POST",
                 headers: { "Content-Type":"application/json" },
                 body: JSON.stringify(body)
               });
               const raw = await r.text();
-              let j; try { j = JSON.parse(raw); } catch { throw new Error(`Non-JSON from /agent/message_json: ${raw.slice(0,200)}`); }
+              let j; try { j = JSON.parse(raw); }
+              catch { throw new Error(`Non-JSON from /agent/message_json: ${raw.slice(0,200)}`); }
               if (j.session_id) sessionId = j.session_id;
-              return j;
+              return j; // includes { text, preview?, download_url? }
             }
 
             case "open_export": {
@@ -181,5 +255,3 @@ document.getElementById("startBtn").onclick = async () => {
   </script>
 </body>
 </html>
-
-
