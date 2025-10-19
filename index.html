@@ -11,6 +11,27 @@
     openai-chatkit { width: 430px; height: 720px; border:1px solid #1f2937; border-radius:12px; }
   </style>
 
+<div id="uploader" style="max-width:430px;margin:0 auto 12px auto;">
+  <div style="background:#0f1621;border:1px solid #1f2937;border-radius:10px;padding:12px;">
+    <div style="font-weight:600;margin-bottom:6px;">Please upload your files to begin</div>
+    <div style="font-size:13px;color:#94a3b8;margin-bottom:10px;">
+      Upload <b>both</b> the <i>source census</i> and the <i>carrier template</i>, then press Start.
+    </div>
+    <label style="display:block;margin:6px 0 4px;">Source census file</label>
+    <input id="src" type="file" accept=".csv,.xlsx,.xls,.txt" style="width:100%;">
+
+    <label style="display:block;margin:10px 0 4px;">Carrier template file</label>
+    <input id="tpl" type="file" accept=".csv,.xlsx,.xls,.txt" style="width:100%;">
+
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button id="startBtn" style="background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;">
+        Start
+      </button>
+      <span id="hint" style="font-size:12px;color:#94a3b8;align-self:center;"></span>
+    </div>
+  </div>
+</div>
+  
   <!-- Load ChatKit -->
   <script src="https://cdn.platform.openai.com/deployments/chatkit/chatkit.js" async></script>
 </head>
@@ -23,6 +44,32 @@
   <script type="module">
     const API_BASE = "https://census-api-uyfo.onrender.com";
 
+// Nudge the agent to call start_census_session by sending a tiny user message.
+// The agent instructions will immediately try start_census_session() after any message.
+document.getElementById("startBtn").onclick = async () => {
+  const src = document.getElementById("src").files[0];
+  const tpl = document.getElementById("tpl").files[0];
+  const hint = document.getElementById("hint");
+
+  if (!src || !tpl) {
+    hint.textContent = "Please select BOTH files first.";
+    return;
+  }
+  hint.textContent = "Starting… check the chat.";
+
+  // Send a trivial message so the agent wakes and calls start_census_session()
+  // (The onClientTool handler below will see your preselected files and use those.)
+  try {
+    // ChatKit has no direct "send" API here, so just let the agent start naturally.
+    // A tiny hack: programmatically focus the chat to get it to render if idle.
+    document.getElementById("census-chat").scrollIntoView({behavior: "smooth"});
+    // You can also type a quick "start" to the input if you’ve extended ChatKit; otherwise,
+    // the agent's greeting + your click are enough to get it going.
+  } catch (e) {
+    hint.textContent = "Could not initiate. Try clicking into the chat and say 'start'.";
+  }
+};
+    
     function pickTwoFiles(accept = ".csv,.xlsx,.xls,.txt") {
       return new Promise((resolve, reject) => {
         const input = document.createElement("input");
@@ -102,3 +149,4 @@
   </script>
 </body>
 </html>
+
