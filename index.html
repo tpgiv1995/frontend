@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Census Agent</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background:#0b0f14; color:#e7edf3; }
+    header { padding:16px; border-bottom:1px solid #1f2937; }
+    main { display:flex; gap:20px; padding:16px; }
+    .left, .right { flex:1; }
+    .card { background:#0f1621; border:1px solid #1f2937; border-radius:10px; padding:14px; }
+    label { display:block; margin:10px 0 6px; color:#cbd5e1; }
+    input[type=file] { width:100%; }
+    button { background:#2563eb; color:#fff; border:none; padding:10px 14px; border-radius:8px; cursor:pointer; }
+    button[disabled] { opacity:.5; cursor:not-allowed; }
+    #chat { height:520px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
+    .msg { padding:10px 12px; border-radius:10px; max-width:78%; }
+    .me { background:#1f2937; align-self:flex-end; }
+    .bot { background:#111827; border:1px solid #1f2937; align-self:flex-start; }
+    .row { display:flex; gap:8px; margin-top:10px; }
+    pre { white-space:pre-wrap; word-wrap:break-word; }
+    .muted { color:#94a3b8; font-size:12px; }
+    .pill { display:inline-block; padding:2px 8px; background:#1f2937; border-radius:999px; }
+    .err { color:#fca5a5; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Census Agent</strong>
+    <span class="muted"> — AI-driven census transform</span>
+  </header>
+  <main>
+    <div class="left card">
+      <label>Source census file</label>
+      <input id="src" type="file" accept=".csv,.xlsx,.xls,.txt"/>
+      <label style="margin-top:16px;">Carrier template file</label>
+      <input id="tpl" type="file" accept=".csv,.xlsx,.xls,.txt"/>
+      <div class="row">
+        <button id="start">Start</button>
+        <span id="session" class="pill"></span>
+      </div>
+      <hr/>
+      <label>Message</label>
+      <input id="msg" type="text" placeholder="Answer clarifiers or type 'yes' to export…" style="width:100%; padding:8px; border-radius:8px; border:1px solid #1f2937; background:#0b0f14; color:#e7edf3;"/>
+      <div class="row">
+        <button id="send">Send</button>
+      </div>
+      <p id="status" class="muted"></p>
+    </div>
+    <div class="right card">
+      <div id="chat"></div>
+    </div>
+  </main>
+  <script>
+    // ---------- CHANGE THIS ----------
+    const API_BASE = "https://census-api-uyfo.onrender.com";
+    // ---------------------------------
+
+    const el = (id)=>document.getElementById(id);
+    const chat = el("chat");
+    const statusEl = el("status");
+    const sessionBadge = el("session");
+    let sessionId = "";
+
+    function addMsg(text, who="bot") {
+      const div = document.createElement("div");
+      div.className = "msg "+(who==="me"?"me":"bot");
+      div.innerHTML = text;
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+    function setStatus(txt, isErr=false) {
+      statusEl.textContent = txt || "";
+      statusEl.className = isErr ? "muted err" : "muted";
+    }
+    function renderPreview(rows) {
+      if (!rows || !rows.length) return "No rows.";
+      const cols = Object.keys(rows[0]);
+      let out = cols.join(", ") + "\n";
+      rows.forEach(r=>{
+        out += cols.map(c => (r[c]??"")).join(", ") + "\n";
+      });
+      return out;
+    }
+    async function asJson(r) {
+      const t = await r.text();
+      try { return JSON.parse(t); }
+      catch { throw new Error(`Non-JSON (${r.status} ${r.statusText}): ${t.slice(0,300)}`); }
+    }
+
+    async function start() {
+      const src = el("src").files[0];
+      const tpl = el("tpl").files[0];
+      if (!src || !tpl) { addMsg("Please upload BOTH files.", "bot"); return; }
+
+      setStatus("");
+      addMsg("Uploading files and profiling...", "bot");
+
+      // 1) start session with files
+      const fd = new FormData();
+      fd.append("source_file", src);
+      fd.append("template_file", tpl);
+      try {
+        const r = await fetch(`${API_BASE}/agent/start`, { method:"POST", body: fd });
+        if (!r.ok) throw new Error(`/agent/start failed: ${r.status} ${r.statusText}`);
+        const j = await asJson(r);
+        sessionId = j.session_id;
+        sessionBadge.textContent = sessionId ? ("session " + sessionId.slice(0,8)) : "";
+      } catch (e) {
+        addMsg("⚠️ Could not start: " + e.message, "bot");
+        setStatus("Hint: /agent/start must be accessible and accept files.", true);
+        return;
+      }
+
+      // 2) trigger the agent turn
+      try {
+        const r2 = await fetch(`${API_BASE}/agent/message`, {
+          method:"POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ session_id: sessionId, text: "" })
+        });
+        if (!r2.ok) throw new Error(`/agent/message failed: ${r2.status} ${r2.statusText}`);
+        const j2 = await asJson(r2);
+
+        if (j2.text) addMsg(j2.text, "bot");
+        if (j2.preview) addMsg("<pre>"+renderPreview(j2.preview)+"</pre>", "bot");
+        if (j2.download_url) addMsg(`<a href="${API_BASE}${j2.download_url}">Download Transformed File</a>`, "bot");
+      } catch (e) {
+        addMsg("⚠️ Error during profiling: " + e.message, "bot");
+        setStatus(`If this is 400/422, message expects JSON {session_id, text}`, true);
+      }
+    }
+
+    async function send() {
+      const text = el("msg").value.trim();
+      if (!sessionId) { addMsg("Start a session first.", "bot"); return; }
+      if (!text) return;
+      addMsg(text, "me");
+      el("msg").value = "";
+
+      try {
+        const r = await fetch(`${API_BASE}/agent/message`, {
+          method:"POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ session_id: sessionId, text })
+        });
+        if (!r.ok) throw new Error(`/agent/message failed: ${r.status} ${r.statusText}`);
+        const j = await asJson(r);
+        if (j.text) addMsg(j.text, "bot");
+        if (j.preview) addMsg("<pre>"+renderPreview(j.preview)+"</pre>", "bot");
+        if (j.download_url) addMsg(`<a href="${API_BASE}${j.download_url}">Download Transformed File</a>`, "bot");
+      } catch (e) {
+        addMsg("⚠️ Error: " + e.message, "bot");
+        setStatus("Hint: /agent/message should be JSON (not multipart).", true);
+      }
+    }
+
+    el("start").onclick = start;
+    el("send").onclick = send;
+  </script>
+</body>
+</html>
